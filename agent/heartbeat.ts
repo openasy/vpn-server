@@ -32,7 +32,9 @@ export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatStat
       state.lastError = undefined;
       return;
     }
-    state.lastError = ((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.statusText;
+    // vpn-manager answers with RFC 9457 Problem Details (ADR 0024).
+    const problem = (await res.json().catch(() => ({}))) as { detail?: string; title?: string };
+    state.lastError = problem.detail ?? problem.title ?? res.statusText;
   } catch (err) {
     state.ok = false;
     state.lastStatus = undefined;

@@ -32,7 +32,7 @@ describe("heartbeat", () => {
   });
 
   it("keeps the manager's error when refused", async () => {
-    const url = await listen((_req, res) => res.writeHead(409).end(JSON.stringify({ error: "install vpn-server 1.2.4" })));
+    const url = await listen((_req, res) => res.writeHead(409, { "content-type": "application/problem+json" }).end(JSON.stringify({ type: "https://openasy.github.io/problems/version-mismatch", title: "Version mismatch", status: 409, code: "version-mismatch", detail: "install vpn-server 1.2.4" })));
     const state: HeartbeatState = { ok: true, failures: 0 };
     await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", openvpnRunning: () => false }, state);
     expect(state).toMatchObject({ ok: false, lastStatus: 409, lastError: "install vpn-server 1.2.4", failures: 1 });
