@@ -1,0 +1,27 @@
+{
+  "name": "@openasy/vpn-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenAsy VPN server agent: runs OpenVPN on the host and reports to vpn-manager.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openasy/vpn-server.git"
+  },
+  "scripts": {
+    "start": "node agent/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=26.12.0",
+    "npm": ">=11"
+  }
+}
