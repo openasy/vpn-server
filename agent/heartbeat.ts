@@ -5,9 +5,11 @@ export interface HeartbeatOptions {
   token: string;
   id: string;
   version: string;
-  /** "tcp/443" when set by environment. */
-  listen?: string;
+  /** "udp/1194", "tcp/443". */
+  listen: string;
   openvpnRunning: () => boolean;
+  /** Version of the config this agent applied. */
+  configVersion: () => string | undefined;
 }
 
 export interface HeartbeatState {
@@ -23,7 +25,7 @@ export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatStat
     const res = await fetch(new URL("/api/v1/servers/heartbeat", opts.managerUrl), {
       method: "POST",
       headers: { authorization: `Bearer ${opts.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ id: opts.id, version: opts.version, listen: opts.listen, openvpnRunning: opts.openvpnRunning() }),
+      body: JSON.stringify({ id: opts.id, version: opts.version, listen: opts.listen, openvpnRunning: opts.openvpnRunning(), configVersion: opts.configVersion() ?? null }),
       signal: AbortSignal.timeout(5000),
     });
     state.lastStatus = res.status;

@@ -4,7 +4,9 @@ import type { HeartbeatState } from "./heartbeat.ts";
 export interface AgentStatus {
   version: string;
   listen?: string;
-  configured: boolean;
+  /** Version of the config from vpn-manager that is applied, if any. */
+  configVersion: () => string | undefined;
+  configError: () => string | undefined;
   openvpnRunning: () => boolean;
   openvpnRestarts: () => number;
   heartbeat: HeartbeatState;
@@ -24,8 +26,8 @@ export function createAgentHandler(s: AgentStatus) {
 
     if (path === "/readyz") {
       const problems = [
-        !s.configured && "no OpenVPN config",
-        s.configured && !s.openvpnRunning() && "OpenVPN not running",
+        !s.configVersion() && `no config from vpn-manager yet${s.configError() ? `: ${s.configError()}` : ""}`,
+        s.configVersion() && !s.openvpnRunning() && "OpenVPN not running",
         !s.heartbeat.ok && `vpn-manager unreachable${s.heartbeat.lastError ? `: ${s.heartbeat.lastError}` : ""}`,
       ].filter(Boolean);
       return send(res, problems.length ? 503 : 200, JSON.stringify(problems.length ? { status: "not ready", problems } : { status: "ready" }));

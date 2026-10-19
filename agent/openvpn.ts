@@ -45,6 +45,11 @@ export class OpenVpn {
     });
   }
 
+  async restart(): Promise<void> {
+    await this.stop();
+    this.start();
+  }
+
   stop(): Promise<void> {
     this.stopping = true;
     const child = this.child;

@@ -8,7 +8,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json ./
 COPY agent ./agent
-ENV NODE_ENV=production PORT=9100 OPENVPN_CONFIG=/etc/openvpn/server.conf
+ENV NODE_ENV=production PORT=9100 VPN_STATE_DIR=/var/lib/openasy-vpn
 # 1194/udp by default; set OPENVPN_PROTO and OPENVPN_PORT for others, such as tcp/443.
 EXPOSE 1194/udp 443/tcp 9100
 # OpenVPN needs root, NET_ADMIN and /dev/net/tun to create the tunnel; see compose.yaml in vpn-manager.
