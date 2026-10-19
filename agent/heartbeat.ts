@@ -10,6 +10,7 @@ export interface HeartbeatOptions {
   openvpnRunning: () => boolean;
   /** Version of the config this agent applied. */
   configVersion: () => string | undefined;
+  sessions: () => Array<{ cn: string; realAddress: string; vpnIp: string; bytesIn: number; bytesOut: number; connectedAt: string }>;
 }
 
 export interface HeartbeatState {
@@ -19,20 +20,24 @@ export interface HeartbeatState {
   failures: number;
 }
 
-/** Reports this server to vpn-manager through its public API (ADR 0018). */
-export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatState): Promise<void> {
+/**
+ * Reports this server to vpn-manager through its public API (ADR 0018). Returns the device ids whose
+ * sessions vpn-manager wants ended.
+ */
+export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatState): Promise<string[]> {
   try {
     const res = await fetch(new URL("/api/v1/servers/heartbeat", opts.managerUrl), {
       method: "POST",
       headers: { authorization: `Bearer ${opts.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ id: opts.id, version: opts.version, listen: opts.listen, openvpnRunning: opts.openvpnRunning(), configVersion: opts.configVersion() ?? null }),
+      body: JSON.stringify({ id: opts.id, version: opts.version, listen: opts.listen, openvpnRunning: opts.openvpnRunning(), configVersion: opts.configVersion() ?? null, sessions: opts.sessions() }),
       signal: AbortSignal.timeout(5000),
     });
     state.lastStatus = res.status;
     state.ok = res.ok;
     if (res.ok) {
       state.lastError = undefined;
-      return;
+      const body = (await res.json().catch(() => ({}))) as { disconnect?: unknown };
+      return Array.isArray(body.disconnect) ? body.disconnect.filter((d): d is string => typeof d === "string") : [];
     }
     // vpn-manager answers with RFC 9457 Problem Details (ADR 0024).
     const problem = (await res.json().catch(() => ({}))) as { detail?: string; title?: string };
@@ -44,4 +49,5 @@ export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatStat
   }
   state.failures++;
   log("warn", "heartbeat failed", { status: state.lastStatus, error: state.lastError });
+  return [];
 }

@@ -6,7 +6,10 @@ import { sendHeartbeat, type HeartbeatState } from "./heartbeat.ts";
 import { mkdtempSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer as createUnixServer } from "node:net";
 import { applyFiles } from "./apply.ts";
+import { renderRules } from "./firewall.ts";
+import { disconnect, parseStatus, sessions } from "./management.ts";
 import { render, validate, type ServerConfig } from "./config.ts";
 import { parseListen } from "./listen.ts";
 import { OpenVpn } from "./openvpn.ts";
@@ -28,18 +31,19 @@ describe("heartbeat", () => {
       let body = "";
       for await (const chunk of req) body += chunk;
       received = { auth: req.headers.authorization, body: JSON.parse(body) };
-      res.writeHead(202).end("{}");
+      res.writeHead(202).end(JSON.stringify({ status: "accepted", disconnect: ["dev-1"] }));
     });
     const state: HeartbeatState = { ok: false, failures: 0 };
-    await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: () => true, configVersion: () => "abc" }, state);
+    const disconnect = await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: () => true, configVersion: () => "abc", sessions: () => [] }, state);
     expect(state).toMatchObject({ ok: true, lastStatus: 202, failures: 0 });
-    expect(received).toEqual({ auth: "Bearer t", body: { id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: true, configVersion: "abc" } });
+    expect(disconnect).toEqual(["dev-1"]);
+    expect(received).toEqual({ auth: "Bearer t", body: { id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: true, configVersion: "abc", sessions: [] } });
   });
 
   it("keeps the manager's error when refused", async () => {
     const url = await listen((_req, res) => res.writeHead(409, { "content-type": "application/problem+json" }).end(JSON.stringify({ type: "https://openasy.github.io/problems/version-mismatch", title: "Version mismatch", status: 409, code: "version-mismatch", detail: "install vpn-server 1.2.4" })));
     const state: HeartbeatState = { ok: true, failures: 0 };
-    await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: () => false, configVersion: () => undefined }, state);
+    await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: () => false, configVersion: () => undefined, sessions: () => [] }, state);
     expect(state).toMatchObject({ ok: false, lastStatus: 409, lastError: "install vpn-server 1.2.4", failures: 1 });
   });
 });
@@ -110,8 +114,17 @@ const CONFIG: ServerConfig = {
   crl: PEM("X509 CRL"),
   tlsCrypt: PEM("OpenVPN Static key V1"),
   clients: [
-    { cn: "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64", ip: "10.8.0.2", routes: ["172.16.20.0/24", "172.16.40.12/32"], fullTunnel: false },
-    { cn: "9a1d0e9b-8f64-4f6b-9c2e-3f2b8c1e5d4a", ip: "10.8.0.3", routes: [], fullTunnel: true },
+    {
+      cn: "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64",
+      ip: "10.8.0.2",
+      routes: ["172.16.20.0/24", "172.16.40.12/32"],
+      fullTunnel: false,
+      allow: [
+        { cidr: "172.16.20.0/24", proto: "tcp", ports: [5432, 6432] },
+        { cidr: "172.16.40.12/32", proto: "any", ports: [] },
+      ],
+    },
+    { cn: "9a1d0e9b-8f64-4f6b-9c2e-3f2b8c1e5d4a", ip: "10.8.0.3", routes: [], fullTunnel: true, allow: [{ cidr: "0.0.0.0/0", proto: "any", ports: [] }] },
   ],
 };
 
@@ -124,6 +137,8 @@ describe("config from vpn-manager", () => {
     expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, cn: "../../etc/passwd" }] })).toThrow("bad client");
     expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, routes: ["10.0.0.0/33"] }] })).toThrow("bad client");
     expect(() => validate({ ...CONFIG, key: "nope" })).toThrow("key material");
+    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24", proto: "tcp", ports: [0] }] }] })).toThrow("bad client");
+    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24; rm -rf /", proto: "any", ports: [] }] }] })).toThrow("bad client");
   });
 
   it("renders the server config, and one ccd file per device with its address and routes", () => {
@@ -148,5 +163,63 @@ describe("config from vpn-manager", () => {
     expect(readdirSync(join(dir, "ccd"))).toEqual([CONFIG.clients[0]!.cn]);
     expect(statSync(join(dir, "server.key")).mode & 0o777).toBe(0o600);
     expect(applyFiles(dir, render({ ...fewer, cert: PEM("CERTIFICATE") + "\n" }, listen, dir, "/m.sock")).restart).toBe(true);
+  });
+});
+
+describe("firewall", () => {
+  it("lets each device reach only its networks and ports, and drops the rest", () => {
+    const rules = renderRules(CONFIG.clients).split("\n");
+    expect(rules).toContain("-A OPENASY-VPN -s 10.8.0.2/32 -d 172.16.20.0/24 -p tcp -m multiport --dports 5432,6432 -j ACCEPT");
+    expect(rules).toContain("-A OPENASY-VPN -s 10.8.0.2/32 -d 172.16.40.12/32 -j ACCEPT");
+    expect(rules).toContain("-A OPENASY-VPN -s 10.8.0.3/32 -d 0.0.0.0/0 -j ACCEPT");
+    // Replies come back; nothing else starts a connection to a device or to this server.
+    expect(rules.at(-3)).toBe("-A OPENASY-VPN-LOCAL -j DROP");
+    expect(rules).toContain("-A OPENASY-VPN -j DROP");
+    expect(rules).toContain("-A OPENASY-VPN-TO -j DROP");
+    expect(rules.indexOf("-A OPENASY-VPN -j DROP")).toBeGreaterThan(rules.findLastIndex((r) => r.startsWith("-A OPENASY-VPN -s")));
+  });
+
+  it("splits long port lists, as multiport takes at most 15", () => {
+    const ports = Array.from({ length: 20 }, (_, i) => 8000 + i);
+    const rules = renderRules([{ ...CONFIG.clients[0]!, allow: [{ cidr: "10.0.0.0/8", proto: "udp", ports }] }]);
+    expect(rules.match(/--dports/g)).toHaveLength(2);
+  });
+});
+
+// OpenVPN 2.6 `status 3` output, abridged.
+const STATUS = [
+  "TITLE\tOpenVPN 2.6.14 aarch64-unknown-linux-gnu [SSL (OpenSSL)]",
+  "TIME\t2026-10-19 18:21:33\t1760898093",
+  "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\tVirtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\tConnected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
+  "CLIENT_LIST\tdev-1\t203.0.113.24:51820\t10.8.0.2\t\t1200\t34000\t2026-10-19 18:00:00\t1760896800\tUNDEF\t7\t0\tAES-256-GCM",
+  "CLIENT_LIST\tdev-2\t198.51.100.7:40000\t\t\t10\t20\t2026-10-19 18:21:30\t1760898090\tUNDEF\t8\t1\tAES-256-GCM",
+  "HEADER\tROUTING_TABLE\tVirtual Address\tCommon Name\tReal Address\tLast Ref\tLast Ref (time_t)",
+  "GLOBAL_STATS\tMax bcast/mcast queue length\t0",
+  "END",
+];
+
+describe("OpenVPN management", () => {
+  it("parses connected clients and skips ones without an address yet", () => {
+    expect(parseStatus(STATUS)).toEqual([
+      { cn: "dev-1", realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2025-10-19T18:00:00.000Z", clientId: "7" },
+    ]);
+  });
+
+  it("talks the management protocol over a Unix socket", async () => {
+    const socket = join(mkdtempSync(join(tmpdir(), "mgmt-")), "m.sock");
+    const seen: string[] = [];
+    const fake = createUnixServer((c) => {
+      c.write(">INFO:OpenVPN Management Interface Version 5 -- type 'help' for more info\r\n");
+      c.on("data", (d) => {
+        const cmd = d.toString().trim();
+        seen.push(cmd);
+        c.write(cmd === "status 3" ? STATUS.join("\r\n") + "\r\n" : "SUCCESS: client-kill command succeeded\r\n");
+      });
+    });
+    await new Promise<void>((r) => fake.listen(socket, r));
+    expect((await sessions(socket)).map((s) => s.cn)).toEqual(["dev-1"]);
+    await disconnect(socket, "7");
+    expect(seen).toEqual(["status 3", "client-kill 7"]);
+    await new Promise((r) => fake.close(r));
   });
 });

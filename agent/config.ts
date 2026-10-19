@@ -9,8 +9,20 @@ export interface ServerConfig {
   key: string;
   crl: string;
   tlsCrypt: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean }>;
+  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[] }>;
 }
+
+export interface Allow {
+  cidr: string;
+  proto: "tcp" | "udp" | "any";
+  ports: number[];
+}
+
+const validAllow = (a: Allow) =>
+  CIDR.test(a?.cidr) &&
+  (a.proto === "tcp" || a.proto === "udp" || a.proto === "any") &&
+  Array.isArray(a.ports) &&
+  a.ports.every((p) => Number.isInteger(p) && p >= 1 && p <= 65535);
 
 const IP = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CIDR = /^(\d{1,3}\.){3}\d{1,3}\/(\d|[12]\d|3[0-2])$/;
@@ -32,7 +44,15 @@ export function validate(c: unknown): ServerConfig {
   }
   if (!Array.isArray(v.clients)) throw new Error("config: clients must be a list");
   for (const cl of v.clients) {
-    if (!CN.test(cl.cn) || !IP.test(cl.ip) || typeof cl.fullTunnel !== "boolean" || !Array.isArray(cl.routes) || cl.routes.some((r) => !CIDR.test(r))) {
+    if (
+      !CN.test(cl.cn) ||
+      !IP.test(cl.ip) ||
+      typeof cl.fullTunnel !== "boolean" ||
+      !Array.isArray(cl.routes) ||
+      cl.routes.some((r) => !CIDR.test(r)) ||
+      !Array.isArray(cl.allow) ||
+      !cl.allow.every(validAllow)
+    ) {
       throw new Error(`config: bad client ${JSON.stringify(cl).slice(0, 80)}`);
     }
   }
@@ -57,7 +77,9 @@ export function render(c: ServerConfig, listen: Listen, dir: string, managementS
   const [net, prefix] = c.network.split("/");
   const conf = [
     "# Written by vpn-server from vpn-manager's config; changes here are overwritten.",
-    "dev tun",
+    // A fixed name, because the firewall rules refer to it.
+    "dev tun0",
+    "dev-type tun",
     "topology subnet",
     `server ${net} ${mask(Number(prefix))}`,
     `proto ${listen.proto === "tcp" ? "tcp-server" : "udp"}`,

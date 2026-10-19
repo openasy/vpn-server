@@ -4,10 +4,12 @@ import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { createAgentHandler } from "./app.ts";
 import { applyFiles, ensureNat } from "./apply.ts";
-import { render, validate } from "./config.ts";
+import { render, validate, type ServerConfig } from "./config.ts";
+import { applyFirewall } from "./firewall.ts";
 import { sendHeartbeat, type HeartbeatState } from "./heartbeat.ts";
 import { parseListen, type Listen } from "./listen.ts";
 import { log } from "./log.ts";
+import { disconnect, sessions as readSessions, type LiveSession } from "./management.ts";
 import { OpenVpn } from "./openvpn.ts";
 import { fetchConfig } from "./sync.ts";
 
@@ -42,6 +44,21 @@ let applied: string | undefined;
 let etag: string | undefined;
 let configError: string | undefined;
 let natFor: string | undefined;
+let current: ServerConfig | undefined;
+let live: LiveSession[] = [];
+
+/** Ends sessions by device id; logs and carries on when one is already gone. */
+async function end(cns: Set<string>, reason: string) {
+  for (const s of live.filter((x) => cns.has(x.cn))) {
+    try {
+      await disconnect(managementSocket, s.clientId);
+      log("info", "session ended", { device: s.cn, reason });
+    } catch (err) {
+      log("warn", "could not end a session", { device: s.cn, error: String(err) });
+    }
+  }
+  live = live.filter((x) => !cns.has(x.cn));
+}
 
 /** Pulls the desired state, applies it, then reports. */
 async function tick() {
@@ -54,6 +71,7 @@ async function tick() {
         await ensureNat(config.network);
         natFor = config.network;
       }
+      await applyFirewall(config.clients);
       if (restart || !openvpn.running) {
         log("info", applied ? "config changed, restarting OpenVPN" : "config received, starting OpenVPN", { version: config.version });
         await openvpn.restart();
@@ -62,13 +80,41 @@ async function tick() {
       }
       applied = config.version;
       etag = fetched.etag;
+      current = config;
     }
     configError = undefined;
   } catch (err) {
     configError = (err as Error).message;
     log("warn", "could not apply the config; keeping the last good one", { error: configError });
   }
-  await sendHeartbeat({ managerUrl: managerUrl!, token: token!, id, version, listen: listen.label, openvpnRunning: () => openvpn.running, configVersion: () => applied }, heartbeat);
+
+  // A device that is no longer in the config (revoked, suspended, deleted, expired) loses its session now,
+  // not only when it reconnects.
+  live = [];
+  if (openvpn.running && current) {
+    try {
+      live = await readSessions(managementSocket);
+      const allowed = new Set(current.clients.map((c) => c.cn));
+      await end(new Set(live.map((s) => s.cn).filter((cn) => !allowed.has(cn))), "no longer allowed");
+    } catch (err) {
+      log("warn", "could not read sessions from OpenVPN", { error: String(err) });
+    }
+  }
+
+  const requested = await sendHeartbeat(
+    {
+      managerUrl: managerUrl!,
+      token: token!,
+      id,
+      version,
+      listen: listen.label,
+      openvpnRunning: () => openvpn.running,
+      configVersion: () => applied,
+      sessions: () => live.map(({ clientId: _, ...s }) => s),
+    },
+    heartbeat,
+  );
+  if (requested.length) await end(new Set(requested), "disconnected from vpn-manager");
 }
 
 let busy = false;

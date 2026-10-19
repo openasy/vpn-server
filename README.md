@@ -14,6 +14,11 @@ routes), checks it against a fixed shape, writes it under `VPN_STATE_DIR` and ru
 `nobody` after start. New and revoked devices apply without a restart; certificate or server changes restart OpenVPN.
 When vpn-manager is unreachable the agent keeps running with the last good config (ADR 0023).
 
+Each device reaches only the networks and ports its groups allow: the agent keeps `iptables` chains `OPENASY-VPN`
+(from devices), `OPENASY-VPN-TO` (only replies towards devices) and `OPENASY-VPN-LOCAL` (only replies and ICMP to this
+server). Live sessions come from OpenVPN's management interface on a root-only Unix socket and are reported with each
+heartbeat; sessions of devices that are no longer allowed, or that vpn-manager asks to end, are disconnected.
+
 | Variable | Default | |
 | --- | --- | --- |
 | `VPN_MANAGER_URL` | | vpn-manager base URL (required) |
