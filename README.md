@@ -50,3 +50,10 @@ npm run typecheck && npm test
 
 Release vpn-manager first, then push the same tag here (`v0.1.0`). The workflow refuses to publish a version of
 vpn-server for which no vpn-manager image exists.
+
+## Licence
+
+[AGPL-3.0](./LICENSE). You may use, change and share it; if you run a changed version for others, including as a
+hosted service, you must offer them your source code under the same licence. A commercial licence without these
+obligations is available: see [ADR 0008](https://github.com/openasy/ui/blob/main/docs/decisions/0008-open-source.md).
+"OpenAsy" and its logo are trademarks and are not covered by the licence.
