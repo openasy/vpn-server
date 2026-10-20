@@ -1,6 +1,6 @@
 {
   "name": "@openasy/vpn-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "OpenAsy VPN server agent: runs OpenVPN on the host and reports to vpn-manager.",
   "license": "AGPL-3.0-only",
