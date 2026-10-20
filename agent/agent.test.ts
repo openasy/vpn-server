@@ -25,7 +25,7 @@ async function listen(handler: RequestListener): Promise<string> {
 }
 
 describe("heartbeat", () => {
-  it("posts this server to vpn-manager with the token", async () => {
+  it("posts this server to vpn with the token", async () => {
     let received: { auth?: string; body?: unknown } = {};
     const url = await listen(async (req, res) => {
       let body = "";
@@ -34,16 +34,16 @@ describe("heartbeat", () => {
       res.writeHead(202).end(JSON.stringify({ status: "accepted", disconnect: ["dev-1"] }));
     });
     const state: HeartbeatState = { ok: false, failures: 0 };
-    const disconnect = await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: () => true, configVersion: () => "abc", sessions: () => [] }, state);
+    const disconnect = await sendHeartbeat({ vpnUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: () => true, configVersion: () => "abc", sessions: () => [] }, state);
     expect(state).toMatchObject({ ok: true, lastStatus: 202, failures: 0 });
     expect(disconnect).toEqual(["dev-1"]);
     expect(received).toEqual({ auth: "Bearer t", body: { id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: true, configVersion: "abc", sessions: [] } });
   });
 
-  it("keeps the manager's error when refused", async () => {
+  it("keeps vpn's error when refused", async () => {
     const url = await listen((_req, res) => res.writeHead(409, { "content-type": "application/problem+json" }).end(JSON.stringify({ type: "https://openasy.github.io/problems/version-mismatch", title: "Version mismatch", status: 409, code: "version-mismatch", detail: "install vpn-server 1.2.4" })));
     const state: HeartbeatState = { ok: true, failures: 0 };
-    await sendHeartbeat({ managerUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: () => false, configVersion: () => undefined, sessions: () => [] }, state);
+    await sendHeartbeat({ vpnUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: () => false, configVersion: () => undefined, sessions: () => [] }, state);
     expect(state).toMatchObject({ ok: false, lastStatus: 409, lastError: "install vpn-server 1.2.4", failures: 1 });
   });
 });
@@ -51,15 +51,15 @@ describe("heartbeat", () => {
 describe("health", () => {
   const base = { version: "1.2.3", openvpnRestarts: () => 2 };
 
-  it("is not ready without config or manager", async () => {
+  it("is not ready without config or vpn", async () => {
     const url = await listen(createAgentHandler({ ...base, configVersion: () => undefined, configError: () => "config: 401 Send VPN_SERVER_TOKEN", openvpnRunning: () => false, heartbeat: { ok: false, failures: 3 } }));
     expect((await fetch(`${url}/healthz`)).status).toBe(200);
     const res = await fetch(`${url}/readyz`);
     expect(res.status).toBe(503);
-    expect(((await res.json()) as { problems: string[] }).problems).toEqual(["no config from vpn-manager yet: config: 401 Send VPN_SERVER_TOKEN", "vpn-manager unreachable"]);
+    expect(((await res.json()) as { problems: string[] }).problems).toEqual(["no config from vpn yet: config: 401 Send VPN_SERVER_TOKEN", "vpn unreachable"]);
   });
 
-  it("is ready when OpenVPN runs and the manager answers", async () => {
+  it("is ready when OpenVPN runs and vpn answers", async () => {
     const url = await listen(createAgentHandler({ ...base, configVersion: () => "abc", configError: () => undefined, openvpnRunning: () => true, heartbeat: { ok: true, failures: 0 } }));
     expect((await fetch(`${url}/readyz`)).status).toBe(200);
     const metrics = await (await fetch(`${url}/metrics`)).text();
@@ -128,7 +128,7 @@ const CONFIG: ServerConfig = {
   ],
 };
 
-describe("config from vpn-manager", () => {
+describe("config from vpn", () => {
   it("accepts a well-formed config", () => {
     expect(validate(structuredClone(CONFIG))).toEqual(CONFIG);
   });

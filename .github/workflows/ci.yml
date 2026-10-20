@@ -45,13 +45,13 @@ jobs:
 
       - name: Smoke test
         run: |
-          docker run -d --name smoke -p 9100:9100 -e VPN_MANAGER_URL=http://127.0.0.1:1 -e VPN_SERVER_TOKEN=ci vpn-server:ci
+          docker run -d --name smoke -p 9100:9100 -e VPN_URL=http://127.0.0.1:1 -e VPN_SERVER_TOKEN=ci vpn-server:ci
           for _ in $(seq 1 30); do curl -sf localhost:9100/healthz && break; sleep 1; done
           curl -sf localhost:9100/metrics | grep -q 'openasy_build_info{product="vpn-server"'
           docker exec smoke openvpn --version
           docker logs smoke
 
-  # A real OpenVPN client connects through vpn-server configured by vpn-manager (ADR 0029).
+  # A real OpenVPN client connects through vpn-server configured by vpn (ADR 0029).
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -61,13 +61,13 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: openasy/vpn-manager
-          path: vpn-manager
+          repository: openasy/vpn
+          path: vpn
 
       - name: Build both images
         run: |
-          docker build -t vpn-manager:dev vpn-manager
+          docker build -t vpn:dev vpn
           docker build -t vpn-server:dev vpn-server
 
       - name: Connect, reach the internal network, revoke
-        run: vpn-manager/e2e/run.sh
+        run: vpn/e2e/run.sh

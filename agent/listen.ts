@@ -1,7 +1,7 @@
 export interface Listen {
   proto: "udp" | "tcp";
   port: number;
-  /** "udp/1194", "tcp/443": reported to vpn-manager, which lists it in client configs. */
+  /** "udp/1194", "tcp/443": reported to vpn, which lists it in client configs. */
   label: string;
 }
 

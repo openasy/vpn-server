@@ -1,4 +1,4 @@
-// Turns the desired state from vpn-manager into OpenVPN files (ADR 0022: the agent validates what it applies).
+// Turns the desired state from vpn into OpenVPN files (ADR 0022: the agent validates what it applies).
 import { createHash } from "node:crypto";
 
 export interface ServerConfig {
@@ -76,7 +76,7 @@ export interface Files {
 export function render(c: ServerConfig, listen: Listen, dir: string, managementSocket: string): Files {
   const [net, prefix] = c.network.split("/");
   const conf = [
-    "# Written by vpn-server from vpn-manager's config; changes here are overwritten.",
+    "# Written by vpn-server from vpn's config; changes here are overwritten.",
     // A fixed name, because the firewall rules refer to it.
     "dev tun0",
     "dev-type tun",
@@ -94,7 +94,7 @@ export function render(c: ServerConfig, listen: Listen, dir: string, managementS
     "data-ciphers AES-256-GCM:CHACHA20-POLY1305",
     "tls-version-min 1.2",
     "remote-cert-tls client",
-    // Only devices vpn-manager lists may connect, each with its fixed address.
+    // Only devices vpn lists may connect, each with its fixed address.
     `client-config-dir ${dir}/ccd`,
     "ccd-exclusive",
     "keepalive 10 60",

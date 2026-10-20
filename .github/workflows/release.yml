@@ -45,9 +45,9 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} is not on main or an lts/X.Y branch"; exit 1
           fi
 
-      # ADR 0019: an agent always has the same version as its product, so vpn-manager ships first.
-      - name: Check vpn-manager with the same version is published
-        run: docker manifest inspect "ghcr.io/openasy/vpn-manager:${GITHUB_REF_NAME#v}" > /dev/null
+      # ADR 0019: vpn-server always has the same version as vpn, so vpn ships first.
+      - name: Check vpn with the same version is published
+        run: docker manifest inspect "ghcr.io/openasy/vpn:${GITHUB_REF_NAME#v}" > /dev/null
 
       - run: npm ci
       - run: npm run typecheck

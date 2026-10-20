@@ -15,10 +15,12 @@ import { fetchConfig } from "./sync.ts";
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 
-const managerUrl = process.env.VPN_MANAGER_URL;
+// VPN_MANAGER_URL is the name before vpn-manager became vpn (0.4.0); it works until 0.5.0.
+const vpnUrl = process.env.VPN_URL ?? process.env.VPN_MANAGER_URL;
+if (!process.env.VPN_URL && process.env.VPN_MANAGER_URL) log("warn", "VPN_MANAGER_URL is deprecated: rename it to VPN_URL");
 const token = process.env.VPN_SERVER_TOKEN;
-if (!managerUrl || !token) {
-  log("error", "VPN_MANAGER_URL and VPN_SERVER_TOKEN are required");
+if (!vpnUrl || !token) {
+  log("error", "VPN_URL and VPN_SERVER_TOKEN are required");
   process.exit(1);
 }
 const id = (process.env.VPN_SERVER_ID ?? hostname()).toLowerCase();
@@ -63,7 +65,7 @@ async function end(cns: Set<string>, reason: string) {
 /** Pulls the desired state, applies it, then reports. */
 async function tick() {
   try {
-    const fetched = await fetchConfig(managerUrl!, token!, id, etag);
+    const fetched = await fetchConfig(vpnUrl!, token!, id, etag);
     if (fetched.changed) {
       const config = validate(fetched.config);
       const { restart } = applyFiles(stateDir, render(config, listen, stateDir, managementSocket));
@@ -103,7 +105,7 @@ async function tick() {
 
   const requested = await sendHeartbeat(
     {
-      managerUrl: managerUrl!,
+      vpnUrl: vpnUrl!,
       token: token!,
       id,
       version,
@@ -114,7 +116,7 @@ async function tick() {
     },
     heartbeat,
   );
-  if (requested.length) await end(new Set(requested), "disconnected from vpn-manager");
+  if (requested.length) await end(new Set(requested), "disconnected from vpn");
 }
 
 let busy = false;
@@ -137,7 +139,7 @@ const server = createServer(
     heartbeat,
   }),
 );
-server.listen(port, () => log("info", "vpn-server started", { version, id, port, listen: listen.label, manager: managerUrl }));
+server.listen(port, () => log("info", "vpn-server started", { version, id, port, listen: listen.label, vpn: vpnUrl }));
 
 async function shutdown(signal: string) {
   log("info", "shutting down", { signal });

@@ -4,7 +4,7 @@ import type { HeartbeatState } from "./heartbeat.ts";
 export interface AgentStatus {
   version: string;
   listen?: string;
-  /** Version of the config from vpn-manager that is applied, if any. */
+  /** Version of the config from vpn that is applied, if any. */
   configVersion: () => string | undefined;
   configError: () => string | undefined;
   openvpnRunning: () => boolean;
@@ -26,9 +26,9 @@ export function createAgentHandler(s: AgentStatus) {
 
     if (path === "/readyz") {
       const problems = [
-        !s.configVersion() && `no config from vpn-manager yet${s.configError() ? `: ${s.configError()}` : ""}`,
+        !s.configVersion() && `no config from vpn yet${s.configError() ? `: ${s.configError()}` : ""}`,
         s.configVersion() && !s.openvpnRunning() && "OpenVPN not running",
-        !s.heartbeat.ok && `vpn-manager unreachable${s.heartbeat.lastError ? `: ${s.heartbeat.lastError}` : ""}`,
+        !s.heartbeat.ok && `vpn unreachable${s.heartbeat.lastError ? `: ${s.heartbeat.lastError}` : ""}`,
       ].filter(Boolean);
       return send(res, problems.length ? 503 : 200, JSON.stringify(problems.length ? { status: "not ready", problems } : { status: "ready" }));
     }
@@ -44,7 +44,7 @@ export function createAgentHandler(s: AgentStatus) {
         "# HELP openasy_openvpn_restarts_total Times OpenVPN was restarted.",
         "# TYPE openasy_openvpn_restarts_total counter",
         `openasy_openvpn_restarts_total ${s.openvpnRestarts()}`,
-        "# HELP openasy_heartbeat_failures_total Failed heartbeats to vpn-manager.",
+        "# HELP openasy_heartbeat_failures_total Failed heartbeats to vpn.",
         "# TYPE openasy_heartbeat_failures_total counter",
         `openasy_heartbeat_failures_total ${s.heartbeat.failures}`,
       ];
