@@ -43,7 +43,7 @@ If a web server already uses 443 on the host, publish the TCP server on another 
 ## Verify an image
 
 ```bash
-cosign verify ghcr.io/openasy/vpn-server:0.4.0 \
+cosign verify ghcr.io/openasy/vpn-server:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn-server/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
