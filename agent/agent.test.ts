@@ -11,6 +11,7 @@ import { applyFiles } from "./apply.ts";
 import { renderRules } from "./firewall.ts";
 import { disconnect, parseStatus, sessions } from "./management.ts";
 import { render, validate, type ServerConfig } from "./config.ts";
+import { enroll, loadIdentity, saveIdentity, tokenHash } from "./enroll.ts";
 import { parseListen } from "./listen.ts";
 import { OpenVpn } from "./openvpn.ts";
 
@@ -221,5 +222,32 @@ describe("OpenVPN management", () => {
     await disconnect(socket, "7");
     expect(seen).toEqual(["status 3", "client-kill 7"]);
     await new Promise((r) => fake.close(r));
+  });
+});
+
+describe("enrolment", () => {
+  it("trades the token for an id and secret, and keeps them private", async () => {
+    let sent: unknown;
+    const url = await listen(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      sent = { path: req.url, auth: req.headers.authorization, body: JSON.parse(body) };
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ serverId: "fra-1", secret: "ovs_s" }));
+    });
+    const identity = await enroll(url, "ove_t");
+    expect(sent).toEqual({ path: "/api/v1/servers/enroll", auth: undefined, body: { token: "ove_t" } });
+    expect(identity).toEqual({ serverId: "fra-1", secret: "ovs_s", enrolledWith: tokenHash("ove_t") });
+
+    const dir = mkdtempSync(join(tmpdir(), "vpn-server-"));
+    expect(loadIdentity(dir)).toBeUndefined();
+    saveIdentity(dir, identity);
+    expect(loadIdentity(dir)).toEqual(identity);
+    expect(statSync(join(dir, "server.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps vpn's reason when the token is refused", async () => {
+    const url = await listen((_req, res) => res.writeHead(401, { "content-type": "application/problem+json" }).end(JSON.stringify({ status: 401, code: "invalid-token", detail: "The enrolment token is unknown, used or expired." })));
+    await expect(enroll(url, "ove_used")).rejects.toMatchObject({ status: 401, message: "The enrolment token is unknown, used or expired." });
+    await expect(enroll("http://127.0.0.1:9", "ove_t")).rejects.toMatchObject({ status: undefined });
   });
 });

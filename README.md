@@ -6,8 +6,20 @@ API. It always has the same version as `vpn` (ADR 0018, 0019).
 
 ## Run
 
-See [`compose.yaml` in vpn](https://github.com/openasy/vpn/blob/main/compose.yaml). The container needs
-`NET_ADMIN`, `/dev/net/tun` and `--sysctl net.ipv4.ip_forward=1`.
+Add the server under **Servers** in `vpn`, with the address clients connect to. You get a one-time enrolment token;
+start vpn-server with it as `VPN_ENROLL_TOKEN`. The server trades it for its own secret, which it keeps in
+`VPN_STATE_DIR`, so keep that directory on a volume. The token works once, for 7 days (ADR 0032).
+
+```bash
+docker run -d --name vpn-server --restart unless-stopped \
+  --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
+  -p 1194:1194/udp -v vpn-server-data:/var/lib/openasy-vpn \
+  -e VPN_URL=https://vpn.example.com -e VPN_ENROLL_TOKEN=ove_... \
+  ghcr.io/openasy/vpn-server:0.6.0
+```
+
+Next to `vpn`, see [`compose.yaml` in vpn](https://github.com/openasy/vpn/blob/main/compose.yaml). The container
+needs `NET_ADMIN`, `/dev/net/tun` and `--sysctl net.ipv4.ip_forward=1`.
 
 vpn-server pulls its config from `vpn` (certificates, CRL, the devices allowed to connect and their
 routes), checks it against a fixed shape, writes it under `VPN_STATE_DIR` and runs OpenVPN with it. OpenVPN drops to
@@ -22,21 +34,31 @@ heartbeat; sessions of devices that are no longer allowed, or that `vpn` asks to
 | Variable | Default | |
 | --- | --- | --- |
 | `VPN_URL` | | `vpn` base URL (required). `VPN_MANAGER_URL` still works until 0.5.0 |
-| `VPN_SERVER_TOKEN` | | Same token as `vpn` (required) |
-| `VPN_SERVER_ID` | host name | Name shown in `vpn` |
+| `VPN_ENROLL_TOKEN` | | One-time token from Servers in `vpn` (required on first start). A new one enrols the server again |
+| `VPN_SERVER_TOKEN` | | Deprecated: the token shared with `vpn`, for servers that never enrolled |
+| `VPN_SERVER_ID` | host name | Deprecated, with `VPN_SERVER_TOKEN`: the name shown in `vpn`. An enrolled server has the name it was added with |
 | `OPENVPN_PROTO` | `udp` | `udp` or `tcp` |
 | `OPENVPN_PORT` | `1194` | `1`-`65535` |
-| `VPN_STATE_DIR` | `/var/lib/openasy-vpn` | Where the config from `vpn` is written |
+| `VPN_STATE_DIR` | `/var/lib/openasy-vpn` | The server's secret and the config from `vpn`. Keep it on a volume |
 | `HEARTBEAT_SECONDS` | `15` | |
 | `PORT` | `9100` | `/healthz`, `/readyz`, `/metrics` |
 
 `/readyz` is ready when a config from `vpn` is applied, OpenVPN runs and `vpn` accepts the heartbeat;
 otherwise it lists the problems.
 
+### Several servers
+
+Each server is added under Servers with its own name and address, and enrols with its own token. Client configs list
+every server that has reported, at its address: UDP first, then TCP. A client tries them in turn, so when one server or
+location is down it connects to the next. Every server carries every device, with the same VPN address.
+
+A client config lists the servers there were when it was made. A server added later reaches only devices added after
+it; give locations DNS names from the start, so that moving a server does not need new client configs.
+
 ### Ports
 
 One vpn-server listens on one protocol and port. To offer several, for example UDP 1194 and TCP 443, run one
-container per port with the same configuration and its own `VPN_SERVER_ID`; `compose.yaml` in `vpn` does this.
+container per port, each added and enrolled as its own server; `compose.yaml` in `vpn` does this.
 TCP 443 gets through networks that allow only HTTPS. UDP is faster, so keep it as the default.
 If a web server already uses 443 on the host, publish the TCP server on another host port.
 

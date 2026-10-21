@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import { createAgentHandler } from "./app.ts";
 import { applyFiles, ensureNat } from "./apply.ts";
 import { render, validate, type ServerConfig } from "./config.ts";
+import { enroll, EnrollError, loadIdentity, saveIdentity, tokenHash } from "./enroll.ts";
 import { applyFirewall } from "./firewall.ts";
 import { sendHeartbeat, type HeartbeatState } from "./heartbeat.ts";
 import { parseListen, type Listen } from "./listen.ts";
@@ -18,16 +19,50 @@ const { version } = JSON.parse(readFileSync(new URL("../package.json", import.me
 // VPN_MANAGER_URL is the name before vpn-manager became vpn (0.4.0); it works until 0.5.0.
 const vpnUrl = process.env.VPN_URL ?? process.env.VPN_MANAGER_URL;
 if (!process.env.VPN_URL && process.env.VPN_MANAGER_URL) log("warn", "VPN_MANAGER_URL is deprecated: rename it to VPN_URL");
-const token = process.env.VPN_SERVER_TOKEN;
-if (!vpnUrl || !token) {
-  log("error", "VPN_URL and VPN_SERVER_TOKEN are required");
+if (!vpnUrl) {
+  log("error", "VPN_URL is required");
   process.exit(1);
 }
-const id = (process.env.VPN_SERVER_ID ?? hostname()).toLowerCase();
+const enrollToken = process.env.VPN_ENROLL_TOKEN || undefined;
 const stateDir = process.env.VPN_STATE_DIR ?? "/var/lib/openasy-vpn";
 const managementSocket = process.env.OPENVPN_MANAGEMENT ?? "/run/openasy-vpn/management.sock";
 const port = Number(process.env.PORT ?? 9100);
 const interval = Number(process.env.HEARTBEAT_SECONDS ?? 15) * 1000;
+
+/**
+ * This server's id and bearer token (ADR 0032): the secret it enrolled for, or VPN_SERVER_TOKEN for a server that
+ * never enrolled. A new VPN_ENROLL_TOKEN, after an admin enrolled it again, replaces the saved secret.
+ */
+async function identify(): Promise<{ id: string; token: string }> {
+  const saved = loadIdentity(stateDir);
+  if (saved && (!enrollToken || saved.enrolledWith === tokenHash(enrollToken))) return { id: saved.serverId, token: saved.secret };
+  if (enrollToken) {
+    for (;;) {
+      try {
+        const identity = await enroll(vpnUrl!, enrollToken);
+        saveIdentity(stateDir, identity);
+        log("info", "enrolled", { id: identity.serverId });
+        return { id: identity.serverId, token: identity.secret };
+      } catch (err) {
+        // A refused token stays refused; an unreachable or failing vpn may come back.
+        if (err instanceof EnrollError && err.status !== undefined && err.status < 500) {
+          log("error", `could not enrol: ${err.message}. If this server enrolled before, keep VPN_STATE_DIR on a volume`);
+          process.exit(1);
+        }
+        log("warn", "could not enrol; trying again", { error: (err as Error).message });
+        await new Promise((resolve) => setTimeout(resolve, interval));
+      }
+    }
+  }
+  const shared = process.env.VPN_SERVER_TOKEN;
+  if (shared) {
+    log("warn", "VPN_SERVER_TOKEN is deprecated: add this server under Servers in vpn and start it with VPN_ENROLL_TOKEN");
+    return { id: (process.env.VPN_SERVER_ID ?? hostname()).toLowerCase(), token: shared };
+  }
+  log("error", "VPN_ENROLL_TOKEN is required: add this server under Servers in vpn to get one");
+  process.exit(1);
+}
+const { id, token } = await identify();
 
 let listen: Listen;
 try {
@@ -65,7 +100,7 @@ async function end(cns: Set<string>, reason: string) {
 /** Pulls the desired state, applies it, then reports. */
 async function tick() {
   try {
-    const fetched = await fetchConfig(vpnUrl!, token!, id, etag);
+    const fetched = await fetchConfig(vpnUrl!, token, id, etag);
     if (fetched.changed) {
       const config = validate(fetched.config);
       const { restart } = applyFiles(stateDir, render(config, listen, stateDir, managementSocket));
@@ -106,7 +141,7 @@ async function tick() {
   const requested = await sendHeartbeat(
     {
       vpnUrl: vpnUrl!,
-      token: token!,
+      token,
       id,
       version,
       listen: listen.label,
