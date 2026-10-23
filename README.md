@@ -15,7 +15,7 @@ docker run -d --name vpn-server --restart unless-stopped \
   --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
   -p 1194:1194/udp -v vpn-server-data:/var/lib/openasy-vpn \
   -e VPN_URL=https://vpn.example.com -e VPN_ENROLL_TOKEN=ove_... \
-  ghcr.io/openasy/vpn-server:0.7.0
+  ghcr.io/openasy/vpn-server:0.7.1
 ```
 
 Next to `vpn`, see [`compose.yaml` in vpn](https://github.com/openasy/vpn/blob/main/compose.yaml). The container
@@ -65,7 +65,7 @@ If a web server already uses 443 on the host, publish the TCP server on another 
 ## Verify an image
 
 ```bash
-cosign verify ghcr.io/openasy/vpn-server:0.7.0 \
+cosign verify ghcr.io/openasy/vpn-server:0.7.1 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn-server/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
