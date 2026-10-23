@@ -17,8 +17,11 @@ export const CHAINS = {
 // iptables' multiport match takes at most 15 ports.
 const chunks = (ports: number[]) => Array.from({ length: Math.ceil(ports.length / 15) }, (_, i) => ports.slice(i * 15, i * 15 + 15));
 
-/** The whole rule set as iptables-restore input. Declaring a chain flushes it, so each apply replaces the rules at once. */
-export function renderRules(clients: ServerConfig["clients"]): string {
+/**
+ * The whole rule set as iptables-restore input. Declaring a chain flushes it, so each apply replaces the rules at once.
+ * With `dns`, the server's tunnel address, devices may also ask its DNS server, and nothing else on it (ADR 0054).
+ */
+export function renderRules(clients: ServerConfig["clients"], dns?: string): string {
   const lines = ["*filter", `:${CHAINS.from} - [0:0]`, `:${CHAINS.to} - [0:0]`, `:${CHAINS.local} - [0:0]`];
   lines.push(`-A ${CHAINS.from} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`);
   for (const c of clients) {
@@ -31,7 +34,9 @@ export function renderRules(clients: ServerConfig["clients"]): string {
   }
   lines.push(`-A ${CHAINS.from} -j DROP`);
   lines.push(`-A ${CHAINS.to} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`, `-A ${CHAINS.to} -j DROP`);
-  lines.push(`-A ${CHAINS.local} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`, `-A ${CHAINS.local} -p icmp -j ACCEPT`, `-A ${CHAINS.local} -j DROP`);
+  lines.push(`-A ${CHAINS.local} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`, `-A ${CHAINS.local} -p icmp -j ACCEPT`);
+  if (dns) for (const proto of ["udp", "tcp"]) lines.push(`-A ${CHAINS.local} -d ${dns}/32 -p ${proto} --dport 53 -j ACCEPT`);
+  lines.push(`-A ${CHAINS.local} -j DROP`);
   lines.push("COMMIT", "");
   return lines.join("\n");
 }
@@ -57,8 +62,8 @@ function restore(input: string): Promise<void> {
 }
 
 /** Replaces the device rules and makes sure traffic is sent through them. */
-export async function applyFirewall(clients: ServerConfig["clients"], dev = "tun0") {
-  await restore(renderRules(clients));
+export async function applyFirewall(clients: ServerConfig["clients"], dns?: string, dev = "tun0") {
+  await restore(renderRules(clients, dns));
   for (const [chain, ...rule] of jumps(dev)) {
     try {
       await run("iptables", ["-C", chain!, ...rule]);

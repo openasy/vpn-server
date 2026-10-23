@@ -15,7 +15,7 @@ docker run -d --name vpn-server --restart unless-stopped \
   --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
   -p 1194:1194/udp -v vpn-server-data:/var/lib/openasy-vpn \
   -e VPN_URL=https://vpn.example.com -e VPN_ENROLL_TOKEN=ove_... \
-  ghcr.io/openasy/vpn-server:0.9.0
+  ghcr.io/openasy/vpn-server:0.10.0
 ```
 
 Next to `vpn`, see [`compose.yaml` in vpn](https://github.com/openasy/vpn/blob/main/compose.yaml). The container
@@ -40,8 +40,13 @@ heartbeat; sessions of devices that are no longer allowed, or that `vpn` asks to
 | `OPENVPN_PROTO` | `udp` | `udp` or `tcp` |
 | `OPENVPN_PORT` | `1194` | `1`-`65535` |
 | `VPN_STATE_DIR` | `/var/lib/openasy-vpn` | The server's secret and the config from `vpn`. Keep it on a volume |
+| `DNS_UPSTREAM` | this host's resolvers | With internal names in `vpn` (ADR 0054): where the domain's other names are asked, such as `10.20.0.53` for this location's DNS, comma-separated |
 | `HEARTBEAT_SECONDS` | `15` | |
 | `PORT` | `9100` | `/healthz`, `/readyz`, `/metrics` |
+
+With `VPN_DNS_DOMAIN` set in `vpn`, the server answers that domain on the tunnel's first address, port 53: names
+with a record in `vpn` from the inside view, and every other name in the domain from `DNS_UPSTREAM`, so the domain's
+public names keep working on the VPN (split-horizon). Other domains are refused, so it is never an open resolver.
 
 `/readyz` is ready when a config from `vpn` is applied, OpenVPN runs and `vpn` accepts the heartbeat;
 otherwise it lists the problems.
@@ -65,7 +70,7 @@ If a web server already uses 443 on the host, publish the TCP server on another 
 ## Verify an image
 
 ```bash
-cosign verify ghcr.io/openasy/vpn-server:0.9.0 \
+cosign verify ghcr.io/openasy/vpn-server:0.10.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn-server/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```

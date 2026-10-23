@@ -1,5 +1,6 @@
 // Turns the desired state from vpn into OpenVPN files (ADR 0022: the agent validates what it applies).
 import { createHash } from "node:crypto";
+import { validRecord, type Zone } from "./dns.ts";
 
 export interface ServerConfig {
   version: string;
@@ -9,7 +10,9 @@ export interface ServerConfig {
   key: string;
   crl: string;
   tlsCrypt: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[] }>;
+  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[]; dns?: boolean }>;
+  /** The install's internal domain and its names (ADR 0054); absent when the install has none. */
+  dns?: Zone;
 }
 
 export interface Allow {
@@ -26,6 +29,7 @@ const validAllow = (a: Allow) =>
 
 const IP = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CIDR = /^(\d{1,3}\.){3}\d{1,3}\/(\d|[12]\d|3[0-2])$/;
+const DOMAIN = /^(?=.{1,200}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 // Device ids are UUIDs; anything else could be a path in the ccd directory.
 const CN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -57,12 +61,27 @@ export function validate(c: unknown): ServerConfig {
       !Array.isArray(cl.routes) ||
       cl.routes.some((r) => !CIDR.test(r)) ||
       !Array.isArray(cl.allow) ||
-      !cl.allow.every(validAllow)
+      !cl.allow.every(validAllow) ||
+      (cl.dns !== undefined && typeof cl.dns !== "boolean")
     ) {
       throw new Error(`config: bad client ${JSON.stringify(cl).slice(0, 80)}`);
     }
   }
+  if (v.dns !== undefined) {
+    const z = v.dns;
+    if (!z || !DOMAIN.test(z.domain) || !Array.isArray(z.records) || z.records.length > 10_000 || (z.forward !== undefined && typeof z.forward !== "boolean"))
+      throw new Error("config: bad dns domain");
+    const bad = z.records.find((r) => !validRecord(r, z.domain));
+    if (bad) throw new Error(`config: bad dns record ${JSON.stringify(bad).slice(0, 80)}`);
+  }
   return v;
+}
+
+/** The server's own address on the tunnel, where devices find the DNS server: the first in the network. */
+export function tunnelAddress(network: string): string {
+  const [net] = network.split("/");
+  const n = net!.split(".").reduce((a, o) => a * 256 + Number(o), 0) + 1;
+  return [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
 }
 
 export interface Listen {
@@ -120,6 +139,15 @@ export function render(c: ServerConfig, listen: Listen, dir: string, managementS
     ccd[cl.cn] = [
       `ifconfig-push ${cl.ip} ${mask(Number(prefix))}`,
       ...(cl.fullTunnel ? ['push "redirect-gateway def1 bypass-dhcp"'] : []),
+      // The internal domain's names from this server, everything else from the device's own resolver (ADR 0054).
+      ...(c.dns && cl.dns !== false
+        ? [
+            `push "dhcp-option DNS ${tunnelAddress(c.network)}"`,
+            `push "dhcp-option DOMAIN-ROUTE ${c.dns.domain}"`,
+            `push "dns server 0 address ${tunnelAddress(c.network)}"`,
+            `push "dns server 0 resolve-domains ${c.dns.domain}"`,
+          ]
+        : []),
       ...cl.routes.map((r) => {
         const [n, p] = r.split("/");
         return `push "route ${n} ${mask(Number(p))}"`;

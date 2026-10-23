@@ -4,7 +4,9 @@ import { hostname } from "node:os";
 import { dirname } from "node:path";
 import { createAgentHandler } from "./app.ts";
 import { applyFiles, ensureNat } from "./apply.ts";
-import { render, validate, type ServerConfig } from "./config.ts";
+import { render, tunnelAddress, validate, type ServerConfig } from "./config.ts";
+import { getServers } from "node:dns";
+import { parseUpstream, serveDns } from "./dns.ts";
 import { enroll, EnrollError, loadIdentity, saveIdentity, tokenHash } from "./enroll.ts";
 import { applyFirewall } from "./firewall.ts";
 import { sendHeartbeat, type HeartbeatState } from "./heartbeat.ts";
@@ -108,7 +110,7 @@ async function tick() {
         await ensureNat(config.network);
         natFor = config.network;
       }
-      await applyFirewall(config.clients);
+      await applyFirewall(config.clients, config.dns ? tunnelAddress(config.network) : undefined);
       if (restart || !openvpn.running) {
         log("info", applied ? "config changed, restarting OpenVPN" : "config received, starting OpenVPN", { version: config.version });
         await openvpn.restart();
@@ -124,6 +126,8 @@ async function tick() {
     configError = (err as Error).message;
     log("warn", "could not apply the config; keeping the last good one", { error: configError });
   }
+
+  await keepDns();
 
   // A device that is no longer in the config (revoked, suspended, deleted, expired) loses its session now,
   // not only when it reconnects.
@@ -154,6 +158,43 @@ async function tick() {
   if (requested.length) await end(new Set(requested), "disconnected from vpn");
 }
 
+// Where the internal domain's other names are asked (split-horizon): DNS_UPSTREAM, or this host's own resolvers.
+const upstreamSetting =
+  process.env.DNS_UPSTREAM?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean) ?? getServers();
+const upstream = upstreamSetting.map(parseUpstream).filter((u) => u !== undefined);
+if (upstream.length < upstreamSetting.length)
+  log("warn", "DNS_UPSTREAM has entries that are not an IP address with an optional port; they are left out", { upstream: upstreamSetting });
+
+// The internal domain's DNS server (ADR 0054), on the tunnel's address once OpenVPN has brought the tunnel up.
+let dns: { address: string; server: ReturnType<typeof serveDns> } | undefined;
+let dnsError: string | undefined;
+async function keepDns() {
+  const address = current?.dns ? tunnelAddress(current.network) : undefined;
+  if (dns && dns.address !== address) {
+    dns.server.stop();
+    dns = undefined;
+    log("info", "internal names stopped");
+  }
+  if (!address || !openvpn.running) return;
+  dns ??= { address, server: serveDns(() => current?.dns, address, 53, upstream) };
+  if (dns.server.listening) return;
+  try {
+    await dns.server.start();
+    dnsError = undefined;
+    log("info", "internal names served", {
+      domain: current!.dns!.domain,
+      address,
+      upstream: current!.dns!.forward === false ? "off" : upstream.map((u) => `${u.host}:${u.port}`),
+    });
+  } catch (err) {
+    // The tunnel's address appears a moment after OpenVPN starts: tried again on the next tick, said once.
+    if (dnsError !== String(err)) log("warn", "could not serve internal names yet", { address, error: String(err) });
+    dnsError = String(err);
+  }
+}
+
 let busy = false;
 const loop = () => {
   if (busy) return;
@@ -179,6 +220,7 @@ server.listen(port, () => log("info", "vpn-server started", { version, id, port,
 async function shutdown(signal: string) {
   log("info", "shutting down", { signal });
   clearInterval(timer);
+  dns?.server.stop();
   setTimeout(() => process.exit(1), 10_000).unref();
   await openvpn.stop();
   server.close(() => process.exit(0));
