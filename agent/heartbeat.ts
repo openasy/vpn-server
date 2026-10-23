@@ -29,7 +29,14 @@ export async function sendHeartbeat(opts: HeartbeatOptions, state: HeartbeatStat
     const res = await fetch(new URL("/api/v1/servers/heartbeat", opts.vpnUrl), {
       method: "POST",
       headers: { authorization: `Bearer ${opts.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ id: opts.id, version: opts.version, listen: opts.listen, openvpnRunning: opts.openvpnRunning(), configVersion: opts.configVersion() ?? null, sessions: opts.sessions() }),
+      body: JSON.stringify({
+        id: opts.id,
+        version: opts.version,
+        listen: opts.listen,
+        openvpnRunning: opts.openvpnRunning(),
+        configVersion: opts.configVersion() ?? null,
+        sessions: opts.sessions(),
+      }),
       signal: AbortSignal.timeout(5000),
     });
     state.lastStatus = res.status;

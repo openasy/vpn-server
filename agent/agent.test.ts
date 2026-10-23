@@ -35,16 +35,53 @@ describe("heartbeat", () => {
       res.writeHead(202).end(JSON.stringify({ status: "accepted", disconnect: ["dev-1"] }));
     });
     const state: HeartbeatState = { ok: false, failures: 0 };
-    const disconnect = await sendHeartbeat({ vpnUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: () => true, configVersion: () => "abc", sessions: () => [] }, state);
+    const disconnect = await sendHeartbeat(
+      {
+        vpnUrl: url,
+        token: "t",
+        id: "edge-1",
+        version: "1.2.3",
+        listen: "tcp/443",
+        openvpnRunning: () => true,
+        configVersion: () => "abc",
+        sessions: () => [],
+      },
+      state,
+    );
     expect(state).toMatchObject({ ok: true, lastStatus: 202, failures: 0 });
     expect(disconnect).toEqual(["dev-1"]);
-    expect(received).toEqual({ auth: "Bearer t", body: { id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: true, configVersion: "abc", sessions: [] } });
+    expect(received).toEqual({
+      auth: "Bearer t",
+      body: { id: "edge-1", version: "1.2.3", listen: "tcp/443", openvpnRunning: true, configVersion: "abc", sessions: [] },
+    });
   });
 
   it("keeps vpn's error when refused", async () => {
-    const url = await listen((_req, res) => res.writeHead(409, { "content-type": "application/problem+json" }).end(JSON.stringify({ type: "https://openasy.github.io/problems/version-mismatch", title: "Version mismatch", status: 409, code: "version-mismatch", detail: "install vpn-server 1.2.4" })));
+    const url = await listen((_req, res) =>
+      res.writeHead(409, { "content-type": "application/problem+json" }).end(
+        JSON.stringify({
+          type: "https://openasy.github.io/problems/version-mismatch",
+          title: "Version mismatch",
+          status: 409,
+          code: "version-mismatch",
+          detail: "install vpn-server 1.2.4",
+        }),
+      ),
+    );
     const state: HeartbeatState = { ok: true, failures: 0 };
-    await sendHeartbeat({ vpnUrl: url, token: "t", id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: () => false, configVersion: () => undefined, sessions: () => [] }, state);
+    await sendHeartbeat(
+      {
+        vpnUrl: url,
+        token: "t",
+        id: "edge-1",
+        version: "1.2.3",
+        listen: "udp/1194",
+        openvpnRunning: () => false,
+        configVersion: () => undefined,
+        sessions: () => [],
+      },
+      state,
+    );
     expect(state).toMatchObject({ ok: false, lastStatus: 409, lastError: "install vpn-server 1.2.4", failures: 1 });
   });
 });
@@ -53,7 +90,15 @@ describe("health", () => {
   const base = { version: "1.2.3", openvpnRestarts: () => 2 };
 
   it("is not ready without config or vpn", async () => {
-    const url = await listen(createAgentHandler({ ...base, configVersion: () => undefined, configError: () => "config: 401 Send VPN_SERVER_TOKEN", openvpnRunning: () => false, heartbeat: { ok: false, failures: 3 } }));
+    const url = await listen(
+      createAgentHandler({
+        ...base,
+        configVersion: () => undefined,
+        configError: () => "config: 401 Send VPN_SERVER_TOKEN",
+        openvpnRunning: () => false,
+        heartbeat: { ok: false, failures: 3 },
+      }),
+    );
     expect((await fetch(`${url}/healthz`)).status).toBe(200);
     const res = await fetch(`${url}/readyz`);
     expect(res.status).toBe(503);
@@ -61,7 +106,15 @@ describe("health", () => {
   });
 
   it("is ready when OpenVPN runs and vpn answers", async () => {
-    const url = await listen(createAgentHandler({ ...base, configVersion: () => "abc", configError: () => undefined, openvpnRunning: () => true, heartbeat: { ok: true, failures: 0 } }));
+    const url = await listen(
+      createAgentHandler({
+        ...base,
+        configVersion: () => "abc",
+        configError: () => undefined,
+        openvpnRunning: () => true,
+        heartbeat: { ok: true, failures: 0 },
+      }),
+    );
     expect((await fetch(`${url}/readyz`)).status).toBe(200);
     const metrics = await (await fetch(`${url}/metrics`)).text();
     expect(metrics).toContain('openasy_build_info{product="vpn-server",version="1.2.3"} 1');
@@ -138,8 +191,12 @@ describe("config from vpn", () => {
     expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, cn: "../../etc/passwd" }] })).toThrow("bad client");
     expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, routes: ["10.0.0.0/33"] }] })).toThrow("bad client");
     expect(() => validate({ ...CONFIG, key: "nope" })).toThrow("key material");
-    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24", proto: "tcp", ports: [0] }] }] })).toThrow("bad client");
-    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24; rm -rf /", proto: "any", ports: [] }] }] })).toThrow("bad client");
+    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24", proto: "tcp", ports: [0] }] }] })).toThrow(
+      "bad client",
+    );
+    expect(() => validate({ ...CONFIG, clients: [{ ...CONFIG.clients[0]!, allow: [{ cidr: "1.2.3.0/24; rm -rf /", proto: "any", ports: [] }] }] })).toThrow(
+      "bad client",
+    );
   });
 
   it("renders the server config, and one ccd file per device with its address and routes", () => {
@@ -150,7 +207,9 @@ describe("config from vpn", () => {
     expect(conf).toContain("ccd-exclusive");
     expect(conf).toContain("user nobody");
     expect(conf).not.toContain("explicit-exit-notify");
-    expect(files.ccd[CONFIG.clients[0]!.cn]).toBe('ifconfig-push 10.8.0.2 255.255.255.0\npush "route 172.16.20.0 255.255.255.0"\npush "route 172.16.40.12 255.255.255.255"\n');
+    expect(files.ccd[CONFIG.clients[0]!.cn]).toBe(
+      'ifconfig-push 10.8.0.2 255.255.255.0\npush "route 172.16.20.0 255.255.255.0"\npush "route 172.16.40.12 255.255.255.255"\n',
+    );
     expect(files.ccd[CONFIG.clients[1]!.cn]).toContain("redirect-gateway def1");
   });
 
@@ -202,7 +261,15 @@ const STATUS = [
 describe("OpenVPN management", () => {
   it("parses connected clients and skips ones without an address yet", () => {
     expect(parseStatus(STATUS)).toEqual([
-      { cn: "dev-1", realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2025-10-19T18:00:00.000Z", clientId: "7" },
+      {
+        cn: "dev-1",
+        realAddress: "203.0.113.24:51820",
+        vpnIp: "10.8.0.2",
+        bytesIn: 1200,
+        bytesOut: 34000,
+        connectedAt: "2025-10-19T18:00:00.000Z",
+        clientId: "7",
+      },
     ]);
   });
 
@@ -246,7 +313,11 @@ describe("enrolment", () => {
   });
 
   it("keeps vpn's reason when the token is refused", async () => {
-    const url = await listen((_req, res) => res.writeHead(401, { "content-type": "application/problem+json" }).end(JSON.stringify({ status: 401, code: "invalid-token", detail: "The enrolment token is unknown, used or expired." })));
+    const url = await listen((_req, res) =>
+      res
+        .writeHead(401, { "content-type": "application/problem+json" })
+        .end(JSON.stringify({ status: 401, code: "invalid-token", detail: "The enrolment token is unknown, used or expired." })),
+    );
     await expect(enroll(url, "ove_used")).rejects.toMatchObject({ status: 401, message: "The enrolment token is unknown, used or expired." });
     await expect(enroll("http://127.0.0.1:9", "ove_t")).rejects.toMatchObject({ status: undefined });
   });

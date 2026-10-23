@@ -39,7 +39,13 @@ export function validate(c: unknown): ServerConfig {
   const v = c as ServerConfig;
   const pem = (s: unknown, tag: string) => typeof s === "string" && s.includes(`-----BEGIN ${tag}`);
   if (!v || typeof v.version !== "string" || !CIDR.test(v.network)) throw new Error("config: bad version or network");
-  if (!pem(v.ca, "CERTIFICATE") || !pem(v.cert, "CERTIFICATE") || !pem(v.key, "PRIVATE KEY") || !pem(v.crl, "X509 CRL") || !pem(v.tlsCrypt, "OpenVPN Static key")) {
+  if (
+    !pem(v.ca, "CERTIFICATE") ||
+    !pem(v.cert, "CERTIFICATE") ||
+    !pem(v.key, "PRIVATE KEY") ||
+    !pem(v.crl, "X509 CRL") ||
+    !pem(v.tlsCrypt, "OpenVPN Static key")
+  ) {
     throw new Error("config: missing or malformed key material");
   }
   if (!Array.isArray(v.clients)) throw new Error("config: clients must be a list");
@@ -130,4 +136,6 @@ export function render(c: ServerConfig, listen: Listen, dir: string, managementS
 }
 
 export const digest = (files: Record<string, string>) =>
-  createHash("sha256").update(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
+  createHash("sha256")
+    .update(JSON.stringify(Object.entries(files).sort(([a], [b]) => a.localeCompare(b))))
+    .digest("hex");

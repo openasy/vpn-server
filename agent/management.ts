@@ -40,7 +40,11 @@ export function command(socket: string, cmd: string, timeoutMs = 5000): Promise<
       const end = lines.findIndex((l) => l === "END" || l.startsWith("SUCCESS:") || l.startsWith("ERROR:"));
       if (end >= 0) {
         if (lines[end]!.startsWith("ERROR:")) done(new Error(`management: ${lines[end]}`));
-        else done(undefined, lines.slice(0, end + 1).filter((l) => !l.startsWith(">")));
+        else
+          done(
+            undefined,
+            lines.slice(0, end + 1).filter((l) => !l.startsWith(">")),
+          );
       }
     });
   });
@@ -48,23 +52,28 @@ export function command(socket: string, cmd: string, timeoutMs = 5000): Promise<
 
 /** Parses `status 3`: tab-separated, with a HEADER line naming the CLIENT_LIST columns. */
 export function parseStatus(lines: string[]): LiveSession[] {
-  const header = lines.find((l) => l.startsWith("HEADER\tCLIENT_LIST"))?.split("\t").slice(2);
+  const header = lines
+    .find((l) => l.startsWith("HEADER\tCLIENT_LIST"))
+    ?.split("\t")
+    .slice(2);
   if (!header) return [];
   const col = (row: string[], name: string) => row[header.indexOf(name)] ?? "";
-  return lines
-    .filter((l) => l.startsWith("CLIENT_LIST\t"))
-    .map((l) => l.split("\t").slice(1))
-    .map((row) => ({
-      cn: col(row, "Common Name"),
-      realAddress: col(row, "Real Address"),
-      vpnIp: col(row, "Virtual Address"),
-      bytesIn: Number(col(row, "Bytes Received")) || 0,
-      bytesOut: Number(col(row, "Bytes Sent")) || 0,
-      connectedAt: new Date(Number(col(row, "Connected Since (time_t)")) * 1000).toISOString(),
-      clientId: col(row, "Client ID"),
-    }))
-    // A client is listed before it has an address; it is not connected yet.
-    .filter((s) => s.cn && s.vpnIp);
+  return (
+    lines
+      .filter((l) => l.startsWith("CLIENT_LIST\t"))
+      .map((l) => l.split("\t").slice(1))
+      .map((row) => ({
+        cn: col(row, "Common Name"),
+        realAddress: col(row, "Real Address"),
+        vpnIp: col(row, "Virtual Address"),
+        bytesIn: Number(col(row, "Bytes Received")) || 0,
+        bytesOut: Number(col(row, "Bytes Sent")) || 0,
+        connectedAt: new Date(Number(col(row, "Connected Since (time_t)")) * 1000).toISOString(),
+        clientId: col(row, "Client ID"),
+      }))
+      // A client is listed before it has an address; it is not connected yet.
+      .filter((s) => s.cn && s.vpnIp)
+  );
 }
 
 export const sessions = async (socket: string) => parseStatus(await command(socket, "status 3"));
