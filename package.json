@@ -1,6 +1,6 @@
 {
   "name": "@openasy/vpn-server",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "OpenAsy VPN server: runs OpenVPN on the host, configured by vpn.",
   "license": "AGPL-3.0-only",
