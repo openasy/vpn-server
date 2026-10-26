@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # vpn-server has no runtime dependencies: Node runs the TypeScript sources directly.
-FROM node:26.12.0-trixie-slim
+FROM node:26.12.1-trixie-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openvpn iptables ca-certificates \
   && rm -rf /var/lib/apt/lists/*
