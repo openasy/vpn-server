@@ -18,7 +18,7 @@ export const CHAINS = {
 const chunks = (ports: number[]) => Array.from({ length: Math.ceil(ports.length / 15) }, (_, i) => ports.slice(i * 15, i * 15 + 15));
 
 /** The whole rule set as iptables-restore input. Declaring a chain flushes it, so each apply replaces the rules at once. */
-export function renderRules(clients: ServerConfig["clients"]): string {
+export function renderRules(clients: ServerConfig["clients"], dev = "tun0"): string {
   const lines = ["*filter", `:${CHAINS.from} - [0:0]`, `:${CHAINS.to} - [0:0]`, `:${CHAINS.local} - [0:0]`];
   lines.push(`-A ${CHAINS.from} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`);
   for (const c of clients) {
@@ -30,6 +30,8 @@ export function renderRules(clients: ServerConfig["clients"]): string {
     }
   }
   lines.push(`-A ${CHAINS.from} -j DROP`);
+  // From one device to another: the sending device's rules above decide, whichever jump the kernel meets first.
+  lines.push(`-A ${CHAINS.to} -i ${dev} -j RETURN`);
   lines.push(`-A ${CHAINS.to} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`, `-A ${CHAINS.to} -j DROP`);
   lines.push(`-A ${CHAINS.local} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT`, `-A ${CHAINS.local} -p icmp -j ACCEPT`, `-A ${CHAINS.local} -j DROP`);
   lines.push("COMMIT", "");
@@ -58,7 +60,7 @@ function restore(input: string): Promise<void> {
 
 /** Replaces the device rules and makes sure traffic is sent through them. */
 export async function applyFirewall(clients: ServerConfig["clients"], dev = "tun0") {
-  await restore(renderRules(clients));
+  await restore(renderRules(clients, dev));
   for (const [chain, ...rule] of jumps(dev)) {
     try {
       await run("iptables", ["-C", chain!, ...rule]);

@@ -239,6 +239,15 @@ describe("firewall", () => {
     expect(rules.indexOf("-A OPENASY-VPN -j DROP")).toBeGreaterThan(rules.findLastIndex((r) => r.startsWith("-A OPENASY-VPN -s")));
   });
 
+  it("leaves traffic from one device to another to the sending device's rules", () => {
+    const rules = renderRules([{ ...CONFIG.clients[0]!, allow: [{ cidr: "10.8.0.10/32", proto: "tcp", ports: [3389] }] }]).split("\n");
+    expect(rules).toContain("-A OPENASY-VPN -s 10.8.0.2/32 -d 10.8.0.10/32 -p tcp -m multiport --dports 3389 -j ACCEPT");
+    // Coming in on the tunnel, a new connection to a device returns to the sending device's chain instead of being dropped.
+    const to = rules.filter((r) => r.startsWith("-A OPENASY-VPN-TO"));
+    expect(to[0]).toBe("-A OPENASY-VPN-TO -i tun0 -j RETURN");
+    expect(to.at(-1)).toBe("-A OPENASY-VPN-TO -j DROP");
+  });
+
   it("splits long port lists, as multiport takes at most 15", () => {
     const ports = Array.from({ length: 20 }, (_, i) => 8000 + i);
     const rules = renderRules([{ ...CONFIG.clients[0]!, allow: [{ cidr: "10.0.0.0/8", proto: "udp", ports }] }]);

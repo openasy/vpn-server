@@ -44,7 +44,14 @@ export async function ensureNat(network: string) {
   } catch {
     // Not Linux, for example in tests.
   }
-  const rule = ["-t", "nat", "POSTROUTING", "-s", network, "-j", "MASQUERADE"];
+  // Traffic between devices keeps its address, so a device sees who connects to it.
+  const rule = ["-t", "nat", "POSTROUTING", "-s", network, "!", "-d", network, "-j", "MASQUERADE"];
+  try {
+    // Before 0.14.0 the rule NATed traffic between devices too.
+    await run("iptables", ["-t", "nat", "-D", "POSTROUTING", "-s", network, "-j", "MASQUERADE"]);
+  } catch {
+    // Not there.
+  }
   try {
     await run("iptables", [rule[0]!, rule[1]!, "-C", ...rule.slice(2)]);
   } catch {
